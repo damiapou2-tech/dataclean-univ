@@ -8,6 +8,47 @@ import re
 
 st.set_page_config(page_title="DataClean Pro | Automatització d'Informes", page_icon="📊", layout="wide")
 
+# ==============================================================================
+# CONTROL D'ACCÉS PER A CLIENTS (Llegeix els usuaris de Streamlit Secrets)
+# ==============================================================================
+def verificar_acces():
+    """Mostra un formulari de login i bloqueja l'app si les credencials no són vàlides."""
+    if st.session_state.get("autenticat", False):
+        return True
+
+    st.title("🔒 Accés restringit — DataClean Pro")
+    st.markdown("Introdueix les credencials facilitades per accedir al motor d'anàlisi.")
+
+    with st.form("formulari_login"):
+        usuari = st.text_input("Usuari")
+        contrasenya = st.text_input("Contrasenya", type="password")
+        enviar = st.form_submit_button("Entrar", type="primary")
+
+    if enviar:
+        usuaris_valids = st.secrets.get("passwords", {})
+        if usuari in usuaris_valids and contrasenya == usuaris_valids[usuari]:
+            st.session_state["autenticat"] = True
+            st.session_state["usuari_actual"] = usuari
+            st.rerun()
+        else:
+            st.error("Usuari o contrasenya incorrectes.")
+
+    return False
+
+if not verificar_acces():
+    st.stop()
+
+with st.sidebar:
+    st.success(f"Sessió activa: **{st.session_state['usuari_actual']}**")
+    if st.button("Tancar sessió", use_container_width=True):
+        st.session_state["autenticat"] = False
+        st.session_state["usuari_actual"] = None
+        st.rerun()
+    st.divider()
+
+# ==============================================================================
+# MOTOR PRINCIPAL DE DATACLEAN PRO
+# ==============================================================================
 st.title("📊 DataClean Pro — Neteja i Automatització d'Informes")
 st.markdown("Compatible amb **Excel (.xlsx, .xls), CSV, TSV i ODS**. Detecta pestanyes, codificacions, formats europeus i genera gràfiques i fórmules executives automàticament.")
 
@@ -262,7 +303,7 @@ if file_vendes and file_cataleg:
 
         mc1, mc2, mc3, mc4, mc5 = st.columns(5)
         col_c_codi = mc1.selectbox("Codi Producte (Catàleg)", cols_c, index=trobar_col(cols_c, ("codi", "ref", "sku", "id", "prod")))
-        col_c_nom = mc2.selectbox("Nom Producte",cols_c,index=trobar_col(cols_c, ("nom", "desc", "article", "producte", "name"), excluir=["codi", "ref", "sku", "id"]))
+        col_c_nom = mc2.selectbox("Nom Producte", cols_c, index=trobar_col(cols_c, ("nom", "desc", "article", "producte", "name"), excluir=["codi", "ref", "sku", "id"]))
         col_c_cat = mc3.selectbox("Categoria / Família", cols_c, index=trobar_col(cols_c, ("cat", "fam", "grup", "tipus")))
         col_c_preu = mc4.selectbox("Preu Venda", cols_c, index=trobar_col(cols_c, ("preu", "pvp", "venta", "price", "import")))
         col_c_cost = mc5.selectbox("Cost Unitari", cols_c, index=trobar_col(cols_c, ("cost", "compra", "base")))
@@ -519,7 +560,7 @@ if file_vendes and file_cataleg:
                         ample = min(max(max_dades, len(str(col))) + 5, 52)
                         ws.set_column(idx, idx, ample)
 
-                # Ressaltem en groc suau els avisos informatius (coincidències sense tiquet + resum files buides)
+                # Ressaltem en groc suau els avisos informatius
                 if not df_alertes.empty and len(blocs_avisos) > 0:
                     ws_al = writer.sheets["4_Alertes_Errors"]
                     inici_avisos_row = errors_critics_count + 1
