@@ -43,6 +43,7 @@ with st.sidebar:
     if st.button("Tancar sessió", use_container_width=True):
         st.session_state["autenticat"] = False
         st.session_state["usuari_actual"] = None
+        st.session_state.pop("informe_llest", None)
         st.rerun()
     st.divider()
 
@@ -560,7 +561,6 @@ if file_vendes and file_cataleg:
                         ample = min(max(max_dades, len(str(col))) + 5, 52)
                         ws.set_column(idx, idx, ample)
 
-                # Ressaltem en groc suau els avisos informatius
                 if not df_alertes.empty and len(blocs_avisos) > 0:
                     ws_al = writer.sheets["4_Alertes_Errors"]
                     inici_avisos_row = errors_critics_count + 1
@@ -630,38 +630,65 @@ if file_vendes and file_cataleg:
                     chart_prod.set_y_axis({"num_format": "#,##0.00 €"})
                     ws_resum.insert_chart(fila_inici_grafics + 18, 0, chart_prod, {"x_scale": 2.42, "y_scale": 1.25})
 
-            # KPIs superiors a la web
+            sufix_final = netejar_nom_arxiu(etiqueta_personalitzada)
+            nom_fitxer_sortida = f"informe_depurat_{sufix_final}.xlsx"
+            detall_buides = " · ".join([f"**{r.pestanya_origen}**: {int(r.recompte)}" for r in recompte_per_full.itertuples(index=False)]) if total_files_buides > 0 else ""
+
+            # Desem tot el resultat a session_state perquè no desaparegui al prémer descarregar
+            st.session_state["informe_llest"] = {
+                "facturacio_total": float(df_valid["facturacio"].sum()),
+                "marge_net_total": float(df_valid["marge_net"].sum()),
+                "registres_valids": len(df_valid),
+                "errors_critics": errors_critics_count,
+                "avisos": avisos_count,
+                "te_id_venda": te_id_venda,
+                "col_v_tiquet": col_v_tiquet,
+                "num_duplicats": len(duplicats),
+                "num_coincidencies": len(possibles_coincidencies),
+                "total_files_buides": total_files_buides,
+                "detall_buides": detall_buides,
+                "df_resum": df_resum,
+                "df_prod_resum": df_prod_resum,
+                "generar_grafics": generar_grafics,
+                "excel_bytes": buffer.getvalue(),
+                "nom_fitxer": nom_fitxer_sortida
+            }
+
+        # ======================================================================
+        # VISUALITZACIÓ PERSISTENT DE RESULTATS I BOTÓ DE DESCÀRREGA
+        # ======================================================================
+        if "informe_llest" in st.session_state:
+            res = st.session_state["informe_llest"]
+
             k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Facturació Total", f"{df_valid['facturacio'].sum():,.2f} €")
-            k2.metric("Marge Net", f"{df_valid['marge_net'].sum():,.2f} €")
-            k3.metric("Registres Vàlids", len(df_valid))
+            k1.metric("Facturació Total", f"{res['facturacio_total']:,.2f} €")
+            k2.metric("Marge Net", f"{res['marge_net_total']:,.2f} €")
+            k3.metric("Registres Vàlids", res["registres_valids"])
             k4.metric(
                 "Errors Crítics (Duplicats / SKU)",
-                errors_critics_count,
-                delta=f"+ {avisos_count} avisos preventius" if avisos_count > 0 else None,
+                res["errors_critics"],
+                delta=f"+ {res['avisos']} avisos preventius" if res["avisos"] > 0 else None,
                 delta_color="off"
             )
 
-            if te_id_venda:
-                st.success(f"🛡️ **Control d'integritat per Tiquet/Factura actiu (`{col_v_tiquet}`):** S'han eliminat **{len(duplicats)} duplicats reals** amb el mateix número de document i s'han conservat totes les compres coincidents amb número de tiquet diferent.")
-            elif len(possibles_coincidencies) > 0:
-                st.warning(f"⚠️ **Mode preventiu (sense columna de Tiquet/Factura):** S'han detectat **{len(possibles_coincidencies)} vendes coincidents** (mateix dia, SKU i quantitat). S'han conservat al càlcul per no perdre facturació real i s'han marcat a `4_Alertes_Errors` per revisar.")
+            if res["te_id_venda"]:
+                st.success(f"🛡️ **Control d'integritat per Tiquet/Factura actiu (`{res['col_v_tiquet']}`):** S'han eliminat **{res['num_duplicats']} duplicats reals** amb el mateix número de document i s'han conservat totes les compres coincidents amb número de tiquet diferent.")
+            elif res["num_coincidencies"] > 0:
+                st.warning(f"⚠️ **Mode preventiu (sense columna de Tiquet/Factura):** S'han detectat **{res['num_coincidencies']} vendes coincidents** (mateix dia, SKU i quantitat). S'han conservat al càlcul per no perdre facturació real i s'han marcat a `4_Alertes_Errors` per revisar.")
 
-            if total_files_buides > 0:
-                detall_text = " · ".join([f"**{r.pestanya_origen}**: {int(r.recompte)}" for r in recompte_per_full.itertuples(index=False)])
-                st.info(f"🧹 **Control de files en blanc:** S'han detectat i ignorat **{total_files_buides} files buides** sense codi ({detall_text}).")
+            if res["total_files_buides"] > 0:
+                st.info(f"🧹 **Control de files en blanc:** S'han detectat i ignorat **{res['total_files_buides']} files buides** sense codi ({res['detall_buides']}).")
 
-            st.dataframe(df_resum, use_container_width=True)
+            st.dataframe(res["df_resum"], use_container_width=True)
 
-            # Panell Visual Interactiu a la web
-            if generar_grafics and not df_valid.empty:
+            if res["generar_grafics"] and res["registres_valids"] > 0:
                 st.divider()
                 st.subheader("📈 Anàlisi Visual Executiva")
                 
                 g1, g2 = st.columns(2)
                 with g1:
                     fig_pie = px.pie(
-                        df_resum,
+                        res["df_resum"],
                         values="unitats_venudes",
                         names="categoria",
                         hole=0.42,
@@ -673,8 +700,8 @@ if file_vendes and file_cataleg:
 
                 with g2:
                     fig_cat_marge = go.Figure(data=[
-                        go.Bar(name="Cost Total (€)", x=df_resum["categoria"], y=df_resum["cost_total"], marker_color="#95A5A6"),
-                        go.Bar(name="Marge Net (€)", x=df_resum["categoria"], y=df_resum["marge_net"], marker_color="#1E8449")
+                        go.Bar(name="Cost Total (€)", x=res["df_resum"]["categoria"], y=res["df_resum"]["cost_total"], marker_color="#95A5A6"),
+                        go.Bar(name="Marge Net (€)", x=res["df_resum"]["categoria"], y=res["df_resum"]["marge_net"], marker_color="#1E8449")
                     ])
                     fig_cat_marge.update_layout(
                         barmode="stack",
@@ -683,7 +710,7 @@ if file_vendes and file_cataleg:
                     )
                     st.plotly_chart(fig_cat_marge, use_container_width=True)
 
-                top_prods = df_prod_resum.head(12)
+                top_prods = res["df_prod_resum"].head(12)
                 fig_prod = go.Figure()
                 fig_prod.add_trace(go.Bar(
                     name="Cost Unitari (€)",
@@ -708,13 +735,10 @@ if file_vendes and file_cataleg:
                 )
                 st.plotly_chart(fig_prod, use_container_width=True)
 
-            sufix_final = netejar_nom_arxiu(etiqueta_personalitzada)
-            nom_fitxer_sortida = f"informe_depurat_{sufix_final}.xlsx"
-
             st.download_button(
-                label=f"📥 Descarregar {nom_fitxer_sortida}",
-                data=buffer.getvalue(),
-                file_name=nom_fitxer_sortida,
+                label=f"📥 Descarregar {res['nom_fitxer']}",
+                data=res["excel_bytes"],
+                file_name=res["nom_fitxer"],
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
